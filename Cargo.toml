@@ -7,3 +7,5 @@ description = "a blur widget for iced"
 license = "MIT"
 
 [dependencies]
+iced_core = { git = "https://github.com/iced-rs/iced", rev = "aa633f6832c93d81fc829bcd351b369f0aada282" }
+iced_widget = { git = "https://github.com/iced-rs/iced", rev = "aa633f6832c93d81fc829bcd351b369f0aada282" }
