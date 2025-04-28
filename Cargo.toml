@@ -1,0 +1,9 @@
+[package]
+name = "iced_blur"
+version = "0.1.0"
+edition = "2024"
+authors = ["Richard Custodio <richardcustodio@pm.me>"]
+description = "a blur widget for iced"
+license = "MIT"
+
+[dependencies]
