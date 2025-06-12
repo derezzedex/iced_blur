@@ -6,6 +6,9 @@ authors = ["Richard Custodio <richardcustodio@pm.me>"]
 description = "a blur widget for iced"
 license = "MIT"
 
+[workspace]
+members = ["examples/*"]
+
 [dependencies]
-iced_core = { git = "https://github.com/iced-rs/iced", rev = "aa633f6832c93d81fc829bcd351b369f0aada282" }
-iced_widget = { git = "https://github.com/iced-rs/iced", rev = "aa633f6832c93d81fc829bcd351b369f0aada282" }
+iced_core = { git = "https://github.com/derezzedex/iced", rev = "c79a40f35c45d173c7dec6d8abed16bf7bd2bb88" }
+iced_widget = { git = "https://github.com/derezzedex/iced", rev = "c79a40f35c45d173c7dec6d8abed16bf7bd2bb88", features = ["wgpu"]}

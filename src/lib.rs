@@ -4,15 +4,41 @@ use iced_core::{
 };
 use iced_core::{layout, mouse, overlay, renderer, widget};
 
+mod shader;
+
+pub fn blur<'a, Message, Theme, Renderer>(
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+) -> Blur<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer + 'a,
+{
+    Blur::new(content)
+}
+
 pub struct Blur<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
+}
+
+impl<'a, Message, Theme, Renderer> Blur<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer + 'a,
+{
+    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        let shader = iced_widget::shader(shader::Shader);
+        let content = iced_widget::stack![shader, content.into()].into();
+
+        Self { content }
+    }
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for Blur<'a, Message, Theme, Renderer>
 where
-    Renderer: iced_core::Renderer + iced_core::renderer::Headless,
-    Theme: iced_core::theme::Base,
+    Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer,
 {
     fn size_hint(&self) -> Size<Length> {
         self.content.as_widget().size_hint()
@@ -106,7 +132,7 @@ where
     fn overlay<'b>(
         &'b mut self,
         state: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
@@ -114,5 +140,18 @@ where
         self.content
             .as_widget_mut()
             .overlay(state, layout, renderer, viewport, translation)
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<Blur<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: 'a,
+    Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer,
+{
+    fn from(blur: Blur<'a, Message, Theme, Renderer>) -> Self {
+        Element::new(blur)
     }
 }
