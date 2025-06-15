@@ -56,8 +56,9 @@ impl shader::Primitive for Primitive {
 }
 
 pub struct Pipeline {
-    render_pipeline: wgpu::RenderPipeline,
-    texture: Texture,
+    downscale_pipeline: wgpu::RenderPipeline,
+    upscale_pipeline: wgpu::RenderPipeline,
+    textures: [Texture; 2],
     sampler: wgpu::Sampler,
 }
 
@@ -73,24 +74,28 @@ impl Pipeline {
             ..Default::default()
         });
 
-        let texture = Texture::new(device, size, format, &sampler);
+        let size = Size::new(
+            size.width.next_power_of_two(),
+            size.height.next_power_of_two(),
+        );
+        let texture1 = Texture::new(device, size, format, &sampler);
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("iced_blur render pipeline layout"),
-            bind_group_layouts: &[&texture.bind_group_layout],
+            label: Some("iced_blur downsample render pipeline layout"),
+            bind_group_layouts: &[&texture1.bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        let paste_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("iced_blur paste shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/paste.wgsl").into()),
+        let downscale_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("iced_blur downsample shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/downsample.wgsl").into()),
         });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("iced_blur render pipeline"),
+        let downscale_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("iced_blur downsample render pipeline"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
-                module: &paste_shader,
+                module: &downscale_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[],
@@ -99,7 +104,46 @@ impl Pipeline {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &paste_shader,
+                module: &downscale_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let texture2 = Texture::new(device, size, format, &sampler);
+
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("iced_blur upsample render pipeline layout"),
+            bind_group_layouts: &[&texture2.bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let upscale_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("iced_blur upsample shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/upsample.wgsl").into()),
+        });
+
+        let upscale_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("iced_blur upsample render pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &upscale_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &upscale_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -113,14 +157,17 @@ impl Pipeline {
         });
 
         Self {
-            texture,
+            textures: [texture1, texture2],
             sampler,
-            render_pipeline,
+            upscale_pipeline,
+            downscale_pipeline,
         }
     }
 
     fn update(&mut self, device: &wgpu::Device, size: Size<u32>) {
-        self.texture.update(device, size, &self.sampler);
+        for texture in &mut self.textures {
+            texture.update(device, size, &self.sampler);
+        }
     }
 
     fn render(
@@ -130,7 +177,7 @@ impl Pipeline {
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        // copy framebuffer into texture
+        // copy framebuffer into `textures[0]`
         {
             let source = wgpu::TexelCopyTextureInfoBase {
                 origin: wgpu::Origin3d {
@@ -149,12 +196,34 @@ impl Pipeline {
 
             encoder.copy_texture_to_texture(
                 source,
-                self.texture.texture.as_image_copy(),
+                self.textures[0].texture.as_image_copy(),
                 copy_size,
             );
         }
 
-        // render texture into framebuffer
+        // downsample `textures[0]` into `textures[1]`
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("iced_blur texture render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.textures[1].view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            render_pass.set_bind_group(0, &self.textures[0].bind_group, &[]);
+            render_pass.set_pipeline(&self.downscale_pipeline);
+            render_pass.draw(0..6, 0..1);
+        }
+
+        // upsample `textures[1]` into `framebuffer`
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("iced_blur texture render pass"),
@@ -172,15 +241,15 @@ impl Pipeline {
             });
 
             render_pass.set_viewport(
-                clip_bounds.x as f32,
-                clip_bounds.y as f32,
+                0.0,
+                0.0,
                 clip_bounds.width as f32,
                 clip_bounds.height as f32,
                 0.0,
                 1.0,
             );
-            render_pass.set_bind_group(0, &self.texture.bind_group, &[]);
-            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.textures[1].bind_group, &[]);
+            render_pass.set_pipeline(&self.upscale_pipeline);
             render_pass.draw(0..6, 0..1);
         }
     }
@@ -188,6 +257,7 @@ impl Pipeline {
 
 struct Texture {
     texture: wgpu::Texture,
+    view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -262,6 +332,7 @@ impl Texture {
 
         Self {
             texture,
+            view,
             bind_group,
             bind_group_layout,
         }
