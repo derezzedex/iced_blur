@@ -23,14 +23,17 @@ impl shader::Primitive for Primitive {
         &self,
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
+        frame: &wgpu::Texture,
         storage: &mut shader::Storage,
         bounds: &Rectangle,
-        _viewport: &shader::Viewport,
+        viewport: &shader::Viewport,
     ) {
-        let size = Size::new(bounds.width.round() as u32, bounds.height.round() as u32);
+        let size = Size::new(
+            (bounds.width * viewport.scale_factor() as f32).round() as u32,
+            (bounds.height * viewport.scale_factor() as f32).round() as u32,
+        );
         if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, size, format));
+            storage.store(Pipeline::new(device, size, frame.format()));
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
@@ -41,22 +44,21 @@ impl shader::Primitive for Primitive {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         storage: &shader::Storage,
+        frame: &wgpu::Texture,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
         storage
             .get::<Pipeline>()
             .unwrap()
-            .render(encoder, target, clip_bounds);
+            .render(encoder, frame, target, clip_bounds);
     }
 }
 
 pub struct Pipeline {
-    device: wgpu::Device,
     render_pipeline: wgpu::RenderPipeline,
     texture: Texture,
     sampler: wgpu::Sampler,
-    copy_shader: wgpu::ShaderModule,
 }
 
 impl Pipeline {
@@ -77,11 +79,6 @@ impl Pipeline {
             label: Some("iced_blur render pipeline layout"),
             bind_group_layouts: &[&texture.bind_group_layout],
             push_constant_ranges: &[],
-        });
-
-        let copy_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("iced_blur copy shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/copy.wgsl").into()),
         });
 
         let paste_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -116,11 +113,9 @@ impl Pipeline {
         });
 
         Self {
-            device: device.clone(),
             texture,
             sampler,
             render_pipeline,
-            copy_shader,
         }
     }
 
@@ -131,113 +126,32 @@ impl Pipeline {
     fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
+        frame: &wgpu::Texture,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        // render framebuffer into texture
+        // copy framebuffer into texture
         {
-            let bind_group_layout =
-                self.device
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("iced_blur target texture layout"),
-                        entries: &[
-                            wgpu::BindGroupLayoutEntry {
-                                binding: 0,
-                                visibility: wgpu::ShaderStages::FRAGMENT,
-                                ty: wgpu::BindingType::Texture {
-                                    sample_type: wgpu::TextureSampleType::Float {
-                                        filterable: true,
-                                    },
-                                    view_dimension: wgpu::TextureViewDimension::D2,
-                                    multisampled: false,
-                                },
-                                count: None,
-                            },
-                            wgpu::BindGroupLayoutEntry {
-                                binding: 1,
-                                visibility: wgpu::ShaderStages::FRAGMENT,
-                                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                                count: None,
-                            },
-                        ],
-                    });
+            let source = wgpu::TexelCopyTextureInfoBase {
+                origin: wgpu::Origin3d {
+                    x: clip_bounds.x,
+                    y: clip_bounds.y,
+                    z: 0,
+                },
+                ..frame.as_image_copy()
+            };
 
-            let target_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("iced_blur target bind group"),
-                layout: &bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(target),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
+            let copy_size = wgpu::Extent3d {
+                width: clip_bounds.width,
+                height: clip_bounds.height,
+                depth_or_array_layers: 1,
+            };
 
-            let layout = self
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("iced_blur render pipeline layout"),
-                    bind_group_layouts: &[&bind_group_layout],
-                    push_constant_ranges: &[],
-                });
-
-            let render_pipeline =
-                self.device
-                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some("iced_blur render pipeline"),
-                        layout: Some(&layout),
-                        vertex: wgpu::VertexState {
-                            module: &self.copy_shader,
-                            entry_point: Some("vs_main"),
-                            compilation_options: wgpu::PipelineCompilationOptions::default(),
-                            buffers: &[],
-                        },
-                        primitive: wgpu::PrimitiveState::default(),
-                        depth_stencil: None,
-                        multisample: wgpu::MultisampleState::default(),
-                        fragment: Some(wgpu::FragmentState {
-                            module: &self.copy_shader,
-                            entry_point: Some("fs_main"),
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format: self.texture.texture.format(),
-                                blend: None,
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                            compilation_options: wgpu::PipelineCompilationOptions::default(),
-                        }),
-                        multiview: None,
-                        cache: None,
-                    });
-
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("iced_blur target render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.texture.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            render_pass.set_scissor_rect(
-                clip_bounds.x,
-                clip_bounds.y,
-                clip_bounds.width,
-                clip_bounds.height,
+            encoder.copy_texture_to_texture(
+                source,
+                self.texture.texture.as_image_copy(),
+                copy_size,
             );
-
-            render_pass.set_bind_group(0, &target_bind_group, &[]);
-            render_pass.set_pipeline(&render_pipeline);
-            render_pass.draw(0..6, 0..1);
         }
 
         // render texture into framebuffer
@@ -257,11 +171,13 @@ impl Pipeline {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_scissor_rect(
-                clip_bounds.x,
-                clip_bounds.y,
-                clip_bounds.width,
-                clip_bounds.height,
+            render_pass.set_viewport(
+                clip_bounds.x as f32,
+                clip_bounds.y as f32,
+                clip_bounds.width as f32,
+                clip_bounds.height as f32,
+                0.0,
+                1.0,
             );
             render_pass.set_bind_group(0, &self.texture.bind_group, &[]);
             render_pass.set_pipeline(&self.render_pipeline);
@@ -272,7 +188,6 @@ impl Pipeline {
 
 struct Texture {
     texture: wgpu::Texture,
-    view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -297,7 +212,9 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
@@ -345,7 +262,6 @@ impl Texture {
 
         Self {
             texture,
-            view,
             bind_group,
             bind_group_layout,
         }

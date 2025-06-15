@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { git = "https://github.com/derezzedex/iced", rev = "c79a40f35c45d173c7dec6d8abed16bf7bd2bb88" }
+iced = { git = "https://github.com/derezzedex/iced", rev = "8c519aa04e4761d38893a4d6d3d443f139fa5b79" }
 iced_blur = { path = "../../" }
