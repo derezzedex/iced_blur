@@ -7,6 +7,7 @@ use iced_core::{layout, mouse, overlay, renderer, widget};
 mod shader;
 
 pub fn blur<'a, Message, Theme, Renderer>(
+    radius: u32,
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
 ) -> Blur<'a, Message, Theme, Renderer>
 where
@@ -14,7 +15,7 @@ where
     Theme: 'a,
     Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer + 'a,
 {
-    Blur::new(content)
+    Blur::new(radius, content)
 }
 
 pub struct Blur<'a, Message, Theme, Renderer> {
@@ -27,8 +28,8 @@ where
     Theme: 'a,
     Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer + 'a,
 {
-    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
-        let shader = iced_widget::shader(shader::Shader);
+    pub fn new(radius: u32, content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        let shader = iced_widget::shader(shader::Shader::new(radius));
         let content = iced_widget::stack![shader, content.into()].into();
 
         Self { content }

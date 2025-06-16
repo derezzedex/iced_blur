@@ -1302,6 +1302,7 @@ dependencies = [
 name = "iced_blur"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "iced_core",
  "iced_widget",
 ]

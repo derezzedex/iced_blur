@@ -1,4 +1,4 @@
-use iced::widget::{button, column, stack, text};
+use iced::widget::{button, column, container, float, stack, text};
 use iced::{Center, Element};
 use iced_blur::blur;
 
@@ -38,6 +38,13 @@ impl Counter {
         .padding(20)
         .align_x(Center);
 
-        stack![background, blur(text("The cake is a lie!").size(20)),].into()
+        let overlay = container(blur(1, text("h").size(20))).padding(20);
+
+        stack![
+            background,
+            float(container(text("mid").size(20)).padding(10)),
+            overlay,
+        ]
+        .into()
     }
 }
