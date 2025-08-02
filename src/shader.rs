@@ -28,7 +28,7 @@ impl shader::Primitive for Shader {
         &self,
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
-        frame: &wgpu::Texture,
+        format: wgpu::TextureFormat,
         storage: &mut shader::Storage,
         bounds: &Rectangle,
         viewport: &shader::Viewport,
@@ -38,7 +38,7 @@ impl shader::Primitive for Shader {
             (bounds.height * viewport.scale_factor() as f32).round() as u32,
         );
         if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, size, frame.format(), self.0));
+            storage.store(Pipeline::new(device, size, format, self.0));
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
@@ -49,14 +49,16 @@ impl shader::Primitive for Shader {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         storage: &shader::Storage,
-        frame: &wgpu::Texture,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        storage
-            .get::<Pipeline>()
-            .unwrap()
-            .render(encoder, frame, target, clip_bounds, self.0);
+        storage.get::<Pipeline>().unwrap().render(
+            encoder,
+            target.texture(),
+            target,
+            clip_bounds,
+            self.0,
+        );
     }
 }
 
@@ -282,6 +284,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -315,23 +318,26 @@ impl Pipeline {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
-            let level = 2u32.pow(i);
             let offset =
                 (i as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
-            render_pass.set_viewport(
-                clip_bounds.x as f32,
-                clip_bounds.y as f32,
-                (clip_bounds.width / level) as f32,
-                (clip_bounds.height / level) as f32,
-                0.0,
-                1.0,
-            );
+
+            if i == 0 {
+                render_pass.set_viewport(
+                    clip_bounds.x as f32,
+                    clip_bounds.y as f32,
+                    clip_bounds.width as f32,
+                    clip_bounds.height as f32,
+                    0.0,
+                    1.0,
+                );
+            }
             render_pass.set_pipeline(&self.upscale_pipeline);
             render_pass.set_bind_group(0, src, &[]);
             render_pass.set_bind_group(1, &self.texel_bind_group, &[offset]);

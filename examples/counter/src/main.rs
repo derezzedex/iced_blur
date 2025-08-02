@@ -1,4 +1,6 @@
-use iced::widget::{button, column, container, float, stack, text};
+use iced::widget::{
+    button, column, container, float, horizontal_space, row, slider, stack, text, toggler,
+};
 use iced::{Center, Element};
 use iced_blur::blur;
 
@@ -8,11 +10,15 @@ pub fn main() -> iced::Result {
 
 #[derive(Default)]
 struct Counter {
+    show: bool,
+    radius: u32,
     value: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
+    ToggleBlur(bool),
+    BlurRadiusChanged(u32),
     Increment,
     Decrement,
 }
@@ -20,6 +26,12 @@ enum Message {
 impl Counter {
     fn update(&mut self, message: Message) {
         match message {
+            Message::ToggleBlur(show) => {
+                self.show = show;
+            }
+            Message::BlurRadiusChanged(radius) => {
+                self.radius = radius;
+            }
             Message::Increment => {
                 self.value += 1;
             }
@@ -30,6 +42,22 @@ impl Counter {
     }
 
     fn view(&self) -> Element<Message> {
+        let controls = row![
+            column![
+                text!("Radius: {}", self.radius),
+                slider(0..=20, self.radius, Message::BlurRadiusChanged),
+            ]
+            .spacing(4),
+            column![
+                text("Blur"),
+                toggler(self.show).on_toggle(Message::ToggleBlur)
+            ]
+            .spacing(4),
+            horizontal_space(),
+        ]
+        .padding(8)
+        .spacing(8);
+
         let background = column![
             button("Increment").on_press(Message::Increment),
             text(self.value).size(50),
@@ -38,12 +66,13 @@ impl Counter {
         .padding(20)
         .align_x(Center);
 
-        let overlay = container(blur(1, text("h").size(20))).padding(20);
-
-        stack![
-            background,
-            float(container(text("mid").size(20)).padding(10)),
-            overlay,
+        column![
+            controls,
+            stack![
+                background,
+                float(container(text("mid").size(20)).padding(10)),
+                self.show.then(|| blur(self.radius, text("h").size(20)))
+            ]
         ]
         .into()
     }
