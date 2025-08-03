@@ -71,7 +71,11 @@ impl Counter {
             stack![
                 background,
                 float(container(text("mid").size(20)).padding(10)),
-                self.show.then(|| blur(self.radius, text("h").size(20)))
+                self.show.then(|| blur(self.radius)),
+                container(text("h").size(20))
+                    .width(50)
+                    .height(50)
+                    .padding(10),
             ]
         ]
         .into()

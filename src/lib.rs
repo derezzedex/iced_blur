@@ -1,68 +1,64 @@
 use iced_core::widget::tree::{self, Tree};
-use iced_core::{
-    Clipboard, Element, Event, Layout, Length, Rectangle, Shell, Size, Vector, Widget,
-};
-use iced_core::{layout, mouse, overlay, renderer, widget};
+use iced_core::{Clipboard, Element, Event, Layout, Length, Rectangle, Shell, Size, Widget};
+use iced_core::{layout, mouse, renderer};
+use iced_widget::Shader;
 
 mod shader;
 
-pub fn blur<'a, Message, Theme, Renderer>(
-    radius: u32,
-    content: impl Into<Element<'a, Message, Theme, Renderer>>,
-) -> Blur<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer + 'a,
-{
-    Blur::new(radius, content)
+pub fn blur<Message>(radius: u32) -> Blur<Message> {
+    Blur::new(radius)
 }
 
-pub struct Blur<'a, Message, Theme, Renderer> {
-    content: Element<'a, Message, Theme, Renderer>,
+pub struct Blur<Message> {
+    shader: Shader<Message, shader::Shader>,
 }
 
-impl<'a, Message, Theme, Renderer> Blur<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer + 'a,
-{
-    pub fn new(radius: u32, content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+impl<Message> Blur<Message> {
+    pub fn new(radius: u32) -> Self {
         let shader = iced_widget::shader(shader::Shader::new(radius));
-        let content = iced_widget::stack![shader, content.into()].into();
 
-        Self { content }
+        Self { shader }
+    }
+
+    pub fn width(self, width: Length) -> Self {
+        Self {
+            shader: self.shader.width(width),
+        }
+    }
+
+    pub fn height(self, height: Length) -> Self {
+        Self {
+            shader: self.shader.height(height),
+        }
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Blur<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Blur<Message>
 where
     Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer,
 {
-    fn size_hint(&self) -> Size<Length> {
-        self.content.as_widget().size_hint()
-    }
-
-    fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
-    }
-
     fn tag(&self) -> tree::Tag {
-        self.content.as_widget().tag()
+        <iced_widget::Shader<Message, shader::Shader> as iced_core::Widget<
+            Message,
+            Theme,
+            Renderer,
+        >>::tag(&self.shader)
     }
 
     fn state(&self) -> tree::State {
-        self.content.as_widget().state()
+        <iced_widget::Shader<Message, shader::Shader> as iced_core::Widget<
+            Message,
+            Theme,
+            Renderer,
+        >>::state(&self.shader)
     }
 
-    fn children(&self) -> Vec<Tree> {
-        self.content.as_widget().children()
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
+    fn size(&self) -> Size<Length> {
+        <iced_widget::Shader<Message, shader::Shader> as iced_core::Widget<
+            Message,
+            Theme,
+            Renderer,
+        >>::size(&self.shader)
     }
 
     fn layout(
@@ -71,19 +67,11 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        self.content.as_widget().layout(tree, renderer, limits)
-    }
-
-    fn operate(
-        &self,
-        state: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        self.content
-            .as_widget()
-            .operate(state, layout, renderer, operation);
+        <iced_widget::Shader<Message, shader::Shader> as iced_core::Widget<
+            Message,
+            Theme,
+            Renderer,
+        >>::layout(&self.shader, tree, renderer, limits)
     }
 
     fn update(
@@ -97,9 +85,36 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget_mut().update(
-            state, event, layout, cursor, renderer, clipboard, shell, viewport,
+        <iced_widget::Shader<Message, shader::Shader> as iced_core::Widget<
+            Message,
+            Theme,
+            Renderer,
+        >>::update(
+            &mut self.shader,
+            state,
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
         );
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        <iced_widget::Shader<Message, shader::Shader> as iced_core::Widget<
+            Message,
+            Theme,
+            Renderer,
+        >>::mouse_interaction(&self.shader, state, layout, cursor, viewport, renderer)
     }
 
     fn draw(
@@ -112,47 +127,19 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.content
-            .as_widget()
+        self.shader
             .draw(tree, renderer, theme, style, layout, cursor, viewport);
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &Renderer,
-    ) -> mouse::Interaction {
-        self.content
-            .as_widget()
-            .mouse_interaction(state, layout, cursor, viewport, renderer)
-    }
-
-    fn overlay<'b>(
-        &'b mut self,
-        state: &'b mut Tree,
-        layout: Layout<'b>,
-        renderer: &Renderer,
-        viewport: &Rectangle,
-        translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(state, layout, renderer, viewport, translation)
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<Blur<'a, Message, Theme, Renderer>>
-    for Element<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> From<Blur<Message>> for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
     Theme: 'a,
     Renderer: 'a,
     Renderer: iced_core::Renderer + iced_widget::renderer::wgpu::primitive::Renderer,
 {
-    fn from(blur: Blur<'a, Message, Theme, Renderer>) -> Self {
+    fn from(blur: Blur<Message>) -> Self {
         Element::new(blur)
     }
 }
