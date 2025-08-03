@@ -9,6 +9,7 @@ use iced_widget::shader;
 pub struct Shader(u32);
 
 impl Shader {
+    const MAX_BLUR_RADIUS: u32 = 16;
     pub fn new(radius: u32) -> Self {
         Self(radius)
     }
@@ -38,7 +39,7 @@ impl shader::Primitive for Shader {
             (bounds.height * viewport.scale_factor() as f32).round() as u32,
         );
         if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, size, format, self.0));
+            storage.store(Pipeline::new(device, size, format));
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
@@ -72,12 +73,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    fn new(
-        device: &wgpu::Device,
-        size: Size<u32>,
-        format: wgpu::TextureFormat,
-        radius: u32,
-    ) -> Self {
+    fn new(device: &wgpu::Device, size: Size<u32>, format: wgpu::TextureFormat) -> Self {
         let offset_alignment = device.limits().min_uniform_buffer_offset_alignment;
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -113,7 +109,7 @@ impl Pipeline {
             }],
         });
 
-        let levels = (0..=radius)
+        let levels = (0..=Shader::MAX_BLUR_RADIUS)
             .map(|i| Level {
                 size: 2u32.pow(i),
                 _pad: bytemuck::Zeroable::zeroed(),
@@ -243,6 +239,8 @@ impl Pipeline {
         clip_bounds: &Rectangle<u32>,
         radius: u32,
     ) {
+        let radius = radius.clamp(1, Shader::MAX_BLUR_RADIUS);
+
         // copy framebuffer into `textures[0]`
         {
             let source = wgpu::TexelCopyTextureInfoBase {
@@ -292,7 +290,7 @@ impl Pipeline {
             });
 
             let offset =
-                (i as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
+                (i - 1 as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
             render_pass.set_pipeline(&self.downscale_pipeline);
             render_pass.set_bind_group(0, src, &[]);
             render_pass.set_bind_group(1, &self.texel_bind_group, &[offset]);
