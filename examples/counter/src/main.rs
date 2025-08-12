@@ -41,7 +41,7 @@ impl Counter {
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let controls = row![
             column![
                 text!("Radius: {}", self.radius),
