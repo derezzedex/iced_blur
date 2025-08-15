@@ -5,13 +5,15 @@ use iced_widget::renderer::wgpu::wgpu;
 use iced_widget::renderer::wgpu::wgpu::util::DeviceExt;
 use iced_widget::shader;
 
-#[derive(Debug)]
-pub struct Shader(u32);
+#[derive(Debug, Clone, Copy)]
+pub struct Shader {
+    passes: u32,
+    offset: f32,
+}
 
 impl Shader {
-    const MAX_BLUR_RADIUS: u32 = 16;
-    pub fn new(radius: u32) -> Self {
-        Self(radius)
+    pub fn new(passes: u32, offset: f32) -> Self {
+        Self { passes, offset }
     }
 }
 
@@ -20,7 +22,10 @@ impl<Message> shader::Program<Message> for Shader {
     type Primitive = Self;
 
     fn draw(&self, _state: &Self::State, _cursor: mouse::Cursor, _bounds: Rectangle) -> Self {
-        Self(self.0)
+        Self {
+            passes: self.passes,
+            offset: self.offset,
+        }
     }
 }
 
@@ -28,7 +33,7 @@ impl shader::Primitive for Shader {
     fn prepare(
         &self,
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         storage: &mut shader::Storage,
         bounds: &Rectangle,
@@ -39,11 +44,11 @@ impl shader::Primitive for Shader {
             (bounds.height * viewport.scale_factor() as f32).round() as u32,
         );
         if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, size, format));
+            storage.store(Pipeline::new(device, size, format, *self));
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
-        pipeline.update(device, size);
+        pipeline.update(queue, device, size, self);
     }
 
     fn render(
@@ -53,29 +58,30 @@ impl shader::Primitive for Shader {
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        storage.get::<Pipeline>().unwrap().render(
-            encoder,
-            target.texture(),
-            target,
-            clip_bounds,
-            self.0,
-        );
+        storage
+            .get::<Pipeline>()
+            .unwrap()
+            .render(encoder, target.texture(), target, clip_bounds);
     }
 }
 
 pub struct Pipeline {
-    offset_alignment: u32,
+    blur: Shader,
     downscale_pipeline: wgpu::RenderPipeline,
     upscale_pipeline: wgpu::RenderPipeline,
-    texel_bind_group: wgpu::BindGroup,
+    offset_bind_group: wgpu::BindGroup,
+    offset_buffer: wgpu::Buffer,
     textures: [Texture; 2],
     sampler: wgpu::Sampler,
 }
 
 impl Pipeline {
-    fn new(device: &wgpu::Device, size: Size<u32>, format: wgpu::TextureFormat) -> Self {
-        let offset_alignment = device.limits().min_uniform_buffer_offset_alignment;
-
+    fn new(
+        device: &wgpu::Device,
+        size: Size<u32>,
+        format: wgpu::TextureFormat,
+        blur: Shader,
+    ) -> Self {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("iced_blur sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -86,62 +92,46 @@ impl Pipeline {
             ..Default::default()
         });
 
-        #[repr(C, align(256))]
-        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-        struct Level {
-            size: u32,
-            _pad: [u32; 63],
-        }
-
-        let texel_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let offset_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("iced_blur texel bind group layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
+                    has_dynamic_offset: false,
                     min_binding_size: wgpu::BufferSize::new(
-                        std::mem::size_of::<Level>() as wgpu::BufferAddress
+                        std::mem::size_of::<f32>() as wgpu::BufferAddress
                     ),
                 },
                 count: None,
             }],
         });
 
-        let levels = (0..=Shader::MAX_BLUR_RADIUS)
-            .map(|i| Level {
-                size: 2u32.pow(i),
-                _pad: bytemuck::Zeroable::zeroed(),
-            })
-            .collect::<Vec<_>>();
-        let texel_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let offset_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("texel size buffer"),
-            contents: bytemuck::cast_slice(&levels),
-            usage: wgpu::BufferUsages::UNIFORM,
+            contents: bytemuck::cast_slice(&[blur.offset]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let texel_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let offset_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("iced_blur texel bind group"),
-            layout: &texel_layout,
+            layout: &offset_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    size: wgpu::BufferSize::new(std::mem::size_of::<Level>() as u64),
-                    ..texel_buffer.as_entire_buffer_binding()
+                    size: wgpu::BufferSize::new(std::mem::size_of::<f32>() as u64),
+                    ..offset_buffer.as_entire_buffer_binding()
                 }),
             }],
         });
 
-        let size = Size::new(
-            size.width.next_power_of_two(),
-            size.height.next_power_of_two(),
-        );
+        let size = Size::new(size.width, size.height);
         let texture1 = Texture::new(device, size, format, &sampler);
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("iced_blur downsample render pipeline layout"),
-            bind_group_layouts: &[&texture1.bind_group_layout, &texel_layout],
+            bind_group_layouts: &[&texture1.bind_group_layout, &offset_layout],
             push_constant_ranges: &[],
         });
 
@@ -180,7 +170,7 @@ impl Pipeline {
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("iced_blur upsample render pipeline layout"),
-            bind_group_layouts: &[&texture2.bind_group_layout, &texel_layout],
+            bind_group_layouts: &[&texture2.bind_group_layout, &offset_layout],
             push_constant_ranges: &[],
         });
 
@@ -216,16 +206,29 @@ impl Pipeline {
         });
 
         Self {
-            offset_alignment,
+            blur,
             upscale_pipeline,
             downscale_pipeline,
-            texel_bind_group,
+            offset_bind_group,
+            offset_buffer,
             sampler,
             textures: [texture1, texture2],
         }
     }
 
-    fn update(&mut self, device: &wgpu::Device, size: Size<u32>) {
+    fn update(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        size: Size<u32>,
+        blur: &Shader,
+    ) {
+        if blur.offset != self.blur.offset {
+            queue.write_buffer(&self.offset_buffer, 0, bytemuck::cast_slice(&[blur.offset]));
+        }
+
+        self.blur = *blur;
+
         for texture in &mut self.textures {
             texture.update(device, size, &self.sampler);
         }
@@ -237,10 +240,7 @@ impl Pipeline {
         frame: &wgpu::Texture,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
-        radius: u32,
     ) {
-        let radius = radius.clamp(1, Shader::MAX_BLUR_RADIUS);
-
         // copy framebuffer into `textures[0]`
         {
             let source = wgpu::TexelCopyTextureInfoBase {
@@ -266,7 +266,7 @@ impl Pipeline {
         }
 
         // downsample
-        for i in 1..=radius {
+        for i in 1..=self.blur.passes {
             let (dst, src) = if i.is_multiple_of(2) {
                 (&self.textures[0].view, &self.textures[1].bind_group)
             } else {
@@ -289,16 +289,16 @@ impl Pipeline {
                 occlusion_query_set: None,
             });
 
-            let offset =
-                (i - 1 as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
+            // let offset =
+            //     (i - 1 as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
             render_pass.set_pipeline(&self.downscale_pipeline);
             render_pass.set_bind_group(0, src, &[]);
-            render_pass.set_bind_group(1, &self.texel_bind_group, &[offset]);
+            render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
             render_pass.draw(0..6, 0..1);
         }
 
         // upsample
-        for i in (0..radius).rev() {
+        for i in (0..self.blur.passes).rev() {
             let (dst, src) = if i == 0 {
                 (target, &self.textures[1].bind_group)
             } else if i.is_multiple_of(2) {
@@ -323,8 +323,8 @@ impl Pipeline {
                 occlusion_query_set: None,
             });
 
-            let offset =
-                (i as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
+            // let offset =
+            //     (i as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
 
             if i == 0 {
                 render_pass.set_viewport(
@@ -338,7 +338,7 @@ impl Pipeline {
             }
             render_pass.set_pipeline(&self.upscale_pipeline);
             render_pass.set_bind_group(0, src, &[]);
-            render_pass.set_bind_group(1, &self.texel_bind_group, &[offset]);
+            render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
             render_pass.draw(0..6, 0..1);
         }
     }

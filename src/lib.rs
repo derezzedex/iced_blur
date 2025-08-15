@@ -5,8 +5,8 @@ use iced_widget::Shader;
 
 mod shader;
 
-pub fn blur<Message>(radius: u32) -> Blur<Message> {
-    Blur::new(radius)
+pub fn blur<Message>(passes: u32, offset: f32) -> Blur<Message> {
+    Blur::new(passes, offset)
 }
 
 pub struct Blur<Message> {
@@ -14,8 +14,8 @@ pub struct Blur<Message> {
 }
 
 impl<Message> Blur<Message> {
-    pub fn new(radius: u32) -> Self {
-        let shader = iced_widget::shader(shader::Shader::new(radius));
+    pub fn new(passes: u32, offset: f32) -> Self {
+        let shader = iced_widget::shader(shader::Shader::new(passes, offset));
 
         Self { shader }
     }

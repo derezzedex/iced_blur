@@ -1,8 +1,8 @@
 @group(0) @binding(0) var u_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_sampler: sampler;
 
-struct Texel { size: u32, _pad0: vec4<u32>, _pad1: vec3<u32> };
-@group(1) @binding(0) var<uniform> u_texel: Texel;
+// struct Offset { offset: f32 };
+@group(1) @binding(0) var<uniform> u_offset: f32;
 
 struct VertexInput {
     @builtin(vertex_index) vertex_index: u32,
@@ -35,7 +35,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var texel_size = vec2<f32>(1) / vec2<f32>(textureDimensions(u_texture));
-    var texel = texel_size * vec2<f32>(u_texel.size);
+    var texel = texel_size * vec2<f32>(u_offset);
 
     const sample = vec2<f32>(-1.0, 1.0);
     const sample2 = vec2<f32>(0.0, 2.0);
