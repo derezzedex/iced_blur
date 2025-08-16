@@ -71,7 +71,8 @@ pub struct Pipeline {
     upscale_pipeline: wgpu::RenderPipeline,
     offset_bind_group: wgpu::BindGroup,
     offset_buffer: wgpu::Buffer,
-    textures: [Texture; 2],
+    base: Texture,
+    textures: [Texture; 5],
     sampler: wgpu::Sampler,
 }
 
@@ -166,11 +167,9 @@ impl Pipeline {
             cache: None,
         });
 
-        let texture2 = Texture::new(device, size, format, &sampler);
-
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("iced_blur upsample render pipeline layout"),
-            bind_group_layouts: &[&texture2.bind_group_layout, &offset_layout],
+            bind_group_layouts: &[&texture1.bind_group_layout, &offset_layout],
             push_constant_ranges: &[],
         });
 
@@ -205,6 +204,10 @@ impl Pipeline {
             cache: None,
         });
 
+        let textures = std::array::from_fn(|i| 2u32.pow(i as u32 + 1).min(16))
+            .map(|level| Size::new(size.width / level, size.height / level))
+            .map(|size| Texture::new(device, size, format, &sampler));
+
         Self {
             blur,
             upscale_pipeline,
@@ -212,7 +215,8 @@ impl Pipeline {
             offset_bind_group,
             offset_buffer,
             sampler,
-            textures: [texture1, texture2],
+            base: texture1,
+            textures,
         }
     }
 
@@ -229,9 +233,71 @@ impl Pipeline {
 
         self.blur = *blur;
 
-        for texture in &mut self.textures {
-            texture.update(device, size, &self.sampler);
+        self.base.update(device, size, &self.sampler);
+        for (i, texture) in self.textures.iter_mut().enumerate() {
+            let level = 2u32.pow(i as u32 + 1).min(16);
+            texture.update(
+                device,
+                Size::new(size.width / level, size.height / level),
+                &self.sampler,
+            );
         }
+    }
+
+    fn downsample(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        src: &wgpu::BindGroup,
+        dst: &wgpu::TextureView,
+    ) {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("iced_blur texture render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: dst,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        render_pass.set_pipeline(&self.downscale_pipeline);
+        render_pass.set_bind_group(0, src, &[]);
+        render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
+    }
+
+    fn upsample(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        src: &wgpu::BindGroup,
+        dst: &wgpu::TextureView,
+    ) {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("iced_blur texture render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: dst,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        render_pass.set_pipeline(&self.upscale_pipeline);
+        render_pass.set_bind_group(0, src, &[]);
+        render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
     }
 
     fn render(
@@ -258,89 +324,56 @@ impl Pipeline {
                 depth_or_array_layers: 1,
             };
 
-            encoder.copy_texture_to_texture(
-                source,
-                self.textures[0].texture.as_image_copy(),
-                copy_size,
-            );
+            encoder.copy_texture_to_texture(source, self.base.texture.as_image_copy(), copy_size);
         }
 
+        // first pass
+        self.downsample(encoder, &self.base.bind_group, &self.textures[0].view);
+
         // downsample
-        for i in 1..=self.blur.passes {
-            let (dst, src) = if i.is_multiple_of(2) {
-                (&self.textures[0].view, &self.textures[1].bind_group)
-            } else {
-                (&self.textures[1].view, &self.textures[0].bind_group)
-            };
+        for i in 1..self.blur.passes as usize {
+            let idx = if i <= 4 { i } else { 4 - (i % 2) };
+            let (src, dst) = (&self.textures[idx - 1].bind_group, &self.textures[idx].view);
 
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("iced_blur texture render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: dst,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            // let offset =
-            //     (i - 1 as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
-            render_pass.set_pipeline(&self.downscale_pipeline);
-            render_pass.set_bind_group(0, src, &[]);
-            render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
-            render_pass.draw(0..6, 0..1);
+            self.downsample(encoder, src, dst);
         }
 
         // upsample
-        for i in (0..self.blur.passes).rev() {
-            let (dst, src) = if i == 0 {
-                (target, &self.textures[1].bind_group)
-            } else if i.is_multiple_of(2) {
-                (&self.textures[0].view, &self.textures[1].bind_group)
-            } else {
-                (&self.textures[1].view, &self.textures[0].bind_group)
-            };
+        for i in (1..self.blur.passes.min(4) as usize).rev() {
+            let (src, dst) = (&self.textures[i].bind_group, &self.textures[i - 1].view);
 
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("iced_blur texture render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: dst,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            // let offset =
-            //     (i as wgpu::DynamicOffset) * (self.offset_alignment as wgpu::DynamicOffset);
-
-            if i == 0 {
-                render_pass.set_viewport(
-                    clip_bounds.x as f32,
-                    clip_bounds.y as f32,
-                    clip_bounds.width as f32,
-                    clip_bounds.height as f32,
-                    0.0,
-                    1.0,
-                );
-            }
-            render_pass.set_pipeline(&self.upscale_pipeline);
-            render_pass.set_bind_group(0, src, &[]);
-            render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
-            render_pass.draw(0..6, 0..1);
+            self.upsample(encoder, src, dst);
         }
+
+        // blit
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("iced_blur texture render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        render_pass.set_viewport(
+            clip_bounds.x as f32,
+            clip_bounds.y as f32,
+            clip_bounds.width as f32,
+            clip_bounds.height as f32,
+            0.0,
+            1.0,
+        );
+        render_pass.set_pipeline(&self.upscale_pipeline);
+        render_pass.set_bind_group(0, &self.textures[0].bind_group, &[]);
+        render_pass.set_bind_group(1, &self.offset_bind_group, &[]);
+        render_pass.draw(0..6, 0..1);
     }
 }
 
