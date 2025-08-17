@@ -1,7 +1,7 @@
 use iced::widget::{
-    button, column, container, float, horizontal_space, row, slider, stack, text, toggler,
+    button, column, container, float, row, slider, stack, text, toggler, vertical_rule,
 };
-use iced::{Center, Element};
+use iced::{Center, Element, Length};
 use iced_blur::blur;
 
 pub fn main() -> iced::Result {
@@ -11,6 +11,7 @@ pub fn main() -> iced::Result {
 #[derive(Default)]
 struct Counter {
     show: bool,
+    radius: f32,
     passes: u32,
     offset: f32,
     value: i64,
@@ -19,6 +20,7 @@ struct Counter {
 #[derive(Debug, Clone, Copy)]
 enum Message {
     ToggleBlur(bool),
+    BlurRadiusChanged(f32),
     BlurOffsetChanged(f32),
     BlurPassesChanged(u32),
     Increment,
@@ -37,6 +39,11 @@ impl Counter {
             Message::BlurOffsetChanged(offset) => {
                 self.offset = offset;
             }
+            Message::BlurRadiusChanged(radius) => {
+                self.radius = radius;
+                self.passes = (((4.0 / 3.0) * radius.log2()).round() as u32).max(1);
+                self.offset = 0.4538f32.powi(self.passes as i32) * self.passes as f32;
+            }
             Message::Increment => {
                 self.value += 1;
             }
@@ -49,25 +56,28 @@ impl Counter {
     fn view(&self) -> Element<'_, Message> {
         let controls = row![
             column![
-                column![
-                    text!("Passes: {}", self.passes),
-                    slider(0..=20, self.passes, Message::BlurPassesChanged),
-                ]
-                .spacing(4),
-                column![
-                    text!("Offset: {}", self.offset),
-                    slider(0f32..=50.0, self.offset, Message::BlurOffsetChanged).step(0.1),
-                ]
-                .spacing(4),
-            ]
-            .spacing(4),
-            column![
                 text("Blur"),
                 toggler(self.show).on_toggle(Message::ToggleBlur)
             ]
             .spacing(4),
-            horizontal_space(),
+            column![
+                text!("Radius: {}", self.radius),
+                slider(0f32..=50.0, self.radius, Message::BlurRadiusChanged).step(0.1),
+            ]
+            .spacing(4),
+            vertical_rule(2),
+            column![
+                text!("Passes: {}", self.passes),
+                slider(0..=20, self.passes, Message::BlurPassesChanged),
+            ]
+            .spacing(4),
+            column![
+                text!("Offset: {}", self.offset),
+                slider(0f32..=50.0, self.offset, Message::BlurOffsetChanged).step(0.1),
+            ]
+            .spacing(4),
         ]
+        .height(Length::Shrink)
         .padding(8)
         .spacing(8);
 
@@ -80,7 +90,7 @@ impl Counter {
         .align_x(Center);
 
         column![
-            controls,
+            container(controls).style(container::dark),
             stack![
                 background,
                 float(container(text("mid").size(20)).padding(10)),
