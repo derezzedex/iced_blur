@@ -34,15 +34,16 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var texel_size = vec2<f32>(1) / vec2<f32>(textureDimensions(u_texture));
-    var texel = texel_size * vec2<f32>(u_offset);
+    var offset = texel_size * vec2<f32>(u_offset);
 
     const sample = vec2<f32>(-1.0, 1.0);
 
-    return 0.5 * textureSample(u_texture, u_sampler, input.uv) + 
-            0.125 * (
-                textureSample(u_texture, u_sampler, input.uv+texel*sample.xx)+
-                textureSample(u_texture, u_sampler, input.uv+texel*sample.yx)+
-                textureSample(u_texture, u_sampler, input.uv+texel*sample.xy)+
-                textureSample(u_texture, u_sampler, input.uv+texel*sample.yy)
-            );
+    return 
+        0.5 * textureSample(u_texture, u_sampler, input.uv) + 
+        0.125 * (
+            textureSample(u_texture, u_sampler, input.uv+offset*sample.xx)+
+            textureSample(u_texture, u_sampler, input.uv+offset*sample.yx)+
+            textureSample(u_texture, u_sampler, input.uv+offset*sample.xy)+
+            textureSample(u_texture, u_sampler, input.uv+offset*sample.yy)
+        );
 }

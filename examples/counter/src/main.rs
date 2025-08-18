@@ -1,7 +1,7 @@
 use iced::widget::{
     button, column, container, float, row, slider, stack, text, toggler, vertical_rule,
 };
-use iced::{Center, Element, Length};
+use iced::{Alignment, Center, Element, Length};
 use iced_blur::blur;
 
 pub fn main() -> iced::Result {
@@ -27,6 +27,13 @@ enum Message {
     Decrement,
 }
 
+fn gaussian_blur(radius: f32) -> (u32, f32) {
+    let passes = (((4.0 / 3.0) * radius.log2()).round() as u32).max(1);
+    let offset = 0.4538f32.powi(passes as i32) * radius;
+
+    (passes, offset)
+}
+
 impl Counter {
     fn update(&mut self, message: Message) {
         match message {
@@ -41,8 +48,10 @@ impl Counter {
             }
             Message::BlurRadiusChanged(radius) => {
                 self.radius = radius;
-                self.passes = (((4.0 / 3.0) * radius.log2()).round() as u32).max(1);
-                self.offset = 0.4538f32.powi(self.passes as i32) * self.passes as f32;
+
+                let (passes, offset) = gaussian_blur(radius);
+                self.passes = passes;
+                self.offset = offset;
             }
             Message::Increment => {
                 self.value += 1;
@@ -62,18 +71,48 @@ impl Counter {
             .spacing(4),
             column![
                 text!("Radius: {}", self.radius),
-                slider(0f32..=50.0, self.radius, Message::BlurRadiusChanged).step(0.1),
+                row![
+                    button("-")
+                        .padding([0, 5])
+                        .on_press(Message::BlurRadiusChanged(self.radius - 0.01)),
+                    slider(0f32..=25.0, self.radius, Message::BlurRadiusChanged).step(0.01),
+                    button("+")
+                        .padding([0, 5])
+                        .on_press(Message::BlurRadiusChanged(self.radius + 0.01)),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(4)
             ]
             .spacing(4),
             vertical_rule(2),
             column![
                 text!("Passes: {}", self.passes),
-                slider(0..=20, self.passes, Message::BlurPassesChanged),
+                row![
+                    button("-")
+                        .padding([0, 5])
+                        .on_press(Message::BlurPassesChanged(self.passes.saturating_sub(1))),
+                    slider(0..=20, self.passes, Message::BlurPassesChanged),
+                    button("+")
+                        .padding([0, 5])
+                        .on_press(Message::BlurPassesChanged(self.passes + 1)),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(4)
             ]
             .spacing(4),
             column![
                 text!("Offset: {}", self.offset),
-                slider(0f32..=50.0, self.offset, Message::BlurOffsetChanged).step(0.1),
+                row![
+                    button("-")
+                        .padding([0, 5])
+                        .on_press(Message::BlurOffsetChanged(self.offset - 0.01)),
+                    slider(0f32..=2.0, self.offset, Message::BlurOffsetChanged).step(0.01),
+                    button("+")
+                        .padding([0, 5])
+                        .on_press(Message::BlurOffsetChanged(self.offset + 0.01)),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(4)
             ]
             .spacing(4),
         ]

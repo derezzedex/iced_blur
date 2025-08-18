@@ -339,8 +339,9 @@ impl Pipeline {
         }
 
         // upsample
-        for i in (1..self.blur.passes.min(4) as usize).rev() {
-            let (src, dst) = (&self.textures[i].bind_group, &self.textures[i - 1].view);
+        for i in (1..self.blur.passes as usize).rev() {
+            let idx = if i <= 4 { i } else { 4 - (i % 2) };
+            let (src, dst) = (&self.textures[idx].bind_group, &self.textures[idx - 1].view);
 
             self.upsample(encoder, src, dst);
         }
