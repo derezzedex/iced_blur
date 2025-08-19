@@ -1,30 +1,36 @@
+use iced::keyboard::{Key, on_key_release};
 use iced::widget::{
-    button, column, container, float, row, slider, stack, text, toggler, vertical_rule,
+    button, column, container, image, row, slider, stack, text, toggler, vertical_rule,
 };
-use iced::{Alignment, Center, Element, Length};
+use iced::{Alignment, Color, Element, Length, Subscription, Task, window};
 use iced_blur::blur;
 
 pub fn main() -> iced::Result {
-    iced::run(Counter::update, Counter::view)
+    iced::application(Counter::default, Counter::update, Counter::view)
+        .centered()
+        .subscription(Counter::subscription)
+        .window_size([340.0, 340.0])
+        .run()
 }
 
 #[derive(Default)]
 struct Counter {
+    controls: bool,
     show: bool,
     radius: f32,
     passes: u32,
     offset: f32,
-    value: i64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Message {
+    Screenshot,
+    ScreenshotTaken(window::Screenshot),
+    ToggleControls,
     ToggleBlur(bool),
     BlurRadiusChanged(f32),
     BlurOffsetChanged(f32),
     BlurPassesChanged(u32),
-    Increment,
-    Decrement,
 }
 
 fn gaussian_blur(radius: f32) -> (u32, f32) {
@@ -35,8 +41,25 @@ fn gaussian_blur(radius: f32) -> (u32, f32) {
 }
 
 impl Counter {
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Screenshot => {
+                return window::get_latest()
+                    .and_then(window::screenshot)
+                    .map(Message::ScreenshotTaken);
+            }
+            Message::ScreenshotTaken(screenshot) => {
+                let _ = ::image::save_buffer(
+                    "assets/blurred.png",
+                    &screenshot.bytes,
+                    screenshot.size.width,
+                    screenshot.size.height,
+                    ::image::ExtendedColorType::Rgba8,
+                );
+            }
+            Message::ToggleControls => {
+                self.controls = !self.controls;
+            }
             Message::ToggleBlur(show) => {
                 self.show = show;
             }
@@ -53,13 +76,17 @@ impl Counter {
                 self.passes = passes;
                 self.offset = offset;
             }
-            Message::Increment => {
-                self.value += 1;
-            }
-            Message::Decrement => {
-                self.value -= 1;
-            }
         }
+
+        Task::none()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        on_key_release(|key, _| match key {
+            Key::Character(key) if key == "o" => Some(Message::ToggleControls),
+            Key::Character(key) if key == "p" => Some(Message::Screenshot),
+            _ => None,
+        })
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -120,24 +147,24 @@ impl Counter {
         .padding(8)
         .spacing(8);
 
-        let background = column![
-            button("Increment").on_press(Message::Increment),
-            text(self.value).size(50),
-            button("Decrement").on_press(Message::Decrement)
-        ]
-        .padding(20)
-        .align_x(Center);
+        let background = container(
+            image("assets/test.png")
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .padding(1)
+        .style(|_| container::Style {
+            background: Some(iced::Background::Color(Color::WHITE)),
+            ..Default::default()
+        });
 
         column![
-            container(controls).style(container::dark),
+            (!self.controls).then(|| container(controls).style(container::dark)),
             stack![
                 background,
-                float(container(text("mid").size(20)).padding(10)),
-                self.show.then(|| blur(self.passes, self.offset)),
-                container(text("h").size(20))
-                    .width(50)
-                    .height(50)
-                    .padding(10),
+                self.show.then(|| blur(self.passes, self.offset)
+                    .width(Length::Fill)
+                    .height(Length::Fill)),
             ]
         ]
         .into()
