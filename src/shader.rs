@@ -332,16 +332,18 @@ impl Pipeline {
 
         // downsample
         for i in 1..self.blur.passes as usize {
-            let idx = if i <= 4 { i } else { 4 - (i % 2) };
-            let (src, dst) = (&self.textures[idx - 1].bind_group, &self.textures[idx].view);
+            let idx = (4 - (i % 2)).min(i);
+            let (src, dst) = (idx - 1, idx);
+            let (src, dst) = (&self.textures[src].bind_group, &self.textures[dst].view);
 
             self.downsample(encoder, src, dst);
         }
 
         // upsample
         for i in (1..self.blur.passes as usize).rev() {
-            let idx = if i <= 4 { i } else { 4 - (i % 2) };
-            let (src, dst) = (&self.textures[idx].bind_group, &self.textures[idx - 1].view);
+            let idx = (4 - (i % 2)).min(i);
+            let (src, dst) = (idx, idx - 1);
+            let (src, dst) = (&self.textures[src].bind_group, &self.textures[dst].view);
 
             self.upsample(encoder, src, dst);
         }

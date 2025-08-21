@@ -33,9 +33,9 @@ enum Message {
     BlurPassesChanged(u32),
 }
 
-fn gaussian_blur(radius: f32) -> (u32, f32) {
-    let passes = (((4.0 / 3.0) * radius.log2()).round() as u32).max(1);
-    let offset = 0.4538f32.powi(passes as i32) * radius;
+fn smooth_blur(radius: f32) -> (u32, f32) {
+    let passes = (((4.0 / 3.0) * radius.ln()).round() as u32).max(1).min(4);
+    let offset = 0.5f32 * ((1.05f32 * passes as f32).powf((1.0 / passes as f32).ln())) * radius;
 
     (passes, offset)
 }
@@ -72,7 +72,7 @@ impl Counter {
             Message::BlurRadiusChanged(radius) => {
                 self.radius = radius;
 
-                let (passes, offset) = gaussian_blur(radius);
+                let (passes, offset) = smooth_blur(radius);
                 self.passes = passes;
                 self.offset = offset;
             }
@@ -102,7 +102,7 @@ impl Counter {
                     button("-")
                         .padding([0, 5])
                         .on_press(Message::BlurRadiusChanged(self.radius - 0.01)),
-                    slider(0f32..=25.0, self.radius, Message::BlurRadiusChanged).step(0.01),
+                    slider(0f32..=100.0, self.radius, Message::BlurRadiusChanged).step(0.01),
                     button("+")
                         .padding([0, 5])
                         .on_press(Message::BlurRadiusChanged(self.radius + 0.01)),
