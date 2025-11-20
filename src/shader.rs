@@ -1,9 +1,8 @@
-use iced_core::Rectangle;
-use iced_core::Size;
-use iced_core::mouse;
-use iced_widget::renderer::wgpu::wgpu;
-use iced_widget::renderer::wgpu::wgpu::util::DeviceExt;
-use iced_widget::shader;
+use iced::mouse;
+use iced::wgpu;
+use iced::widget::shader;
+use iced::{Rectangle, Size};
+use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Shader {
@@ -30,12 +29,22 @@ impl<Message> shader::Program<Message> for Shader {
 }
 
 impl shader::Primitive for Shader {
-    fn prepare(
+    type Renderer = Pipeline;
+
+    fn initialize(
         &self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        storage: &mut shader::Storage,
+    ) -> Self::Renderer {
+        Pipeline::new(device, format, *self)
+    }
+
+    fn prepare(
+        &self,
+        pipeline: &mut Pipeline,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         bounds: &Rectangle,
         viewport: &shader::Viewport,
     ) {
@@ -43,25 +52,18 @@ impl shader::Primitive for Shader {
             (bounds.width * viewport.scale_factor() as f32).round() as u32,
             (bounds.height * viewport.scale_factor() as f32).round() as u32,
         );
-        if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, size, format, *self));
-        }
 
-        let pipeline = storage.get_mut::<Pipeline>().unwrap();
         pipeline.update(queue, device, size, self);
     }
 
     fn render(
         &self,
+        pipeline: &Pipeline,
         encoder: &mut wgpu::CommandEncoder,
-        storage: &shader::Storage,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        storage
-            .get::<Pipeline>()
-            .unwrap()
-            .render(encoder, target.texture(), target, clip_bounds);
+        pipeline.render(encoder, target.texture(), target, clip_bounds);
     }
 }
 
@@ -77,12 +79,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    fn new(
-        device: &wgpu::Device,
-        size: Size<u32>,
-        format: wgpu::TextureFormat,
-        blur: Shader,
-    ) -> Self {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, blur: Shader) -> Self {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("iced_blur sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -127,7 +124,8 @@ impl Pipeline {
             }],
         });
 
-        let size = Size::new(size.width, size.height);
+        // iced default window size
+        let size = Size::new(1024, 768);
         let texture1 = Texture::new(device, size, format, &sampler);
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

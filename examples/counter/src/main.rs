@@ -1,7 +1,5 @@
 use iced::keyboard::{Key, on_key_release};
-use iced::widget::{
-    button, column, container, image, row, slider, stack, text, toggler, vertical_rule,
-};
+use iced::widget::{button, column, container, image, row, rule, slider, stack, text, toggler};
 use iced::{Alignment, Color, Element, Length, Subscription, Task, window};
 use iced_blur::blur;
 
@@ -44,14 +42,14 @@ impl Counter {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Screenshot => {
-                return window::get_latest()
+                return window::latest()
                     .and_then(window::screenshot)
                     .map(Message::ScreenshotTaken);
             }
             Message::ScreenshotTaken(screenshot) => {
                 let _ = ::image::save_buffer(
                     "assets/blurred.png",
-                    &screenshot.bytes,
+                    &screenshot.rgba,
                     screenshot.size.width,
                     screenshot.size.height,
                     ::image::ExtendedColorType::Rgba8,
@@ -111,7 +109,7 @@ impl Counter {
                 .spacing(4)
             ]
             .spacing(4),
-            vertical_rule(2),
+            rule::vertical(2),
             column![
                 text!("Passes: {}", self.passes),
                 row![

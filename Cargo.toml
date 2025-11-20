@@ -10,6 +10,9 @@ license = "MIT"
 members = ["examples/*"]
 
 [dependencies]
-iced_core = { git = "https://github.com/derezzedex/iced", rev = "69e8cc2d33eae623cd900150627d1ad82cef678d" }
-iced_widget = { git = "https://github.com/derezzedex/iced", rev = "69e8cc2d33eae623cd900150627d1ad82cef678d", features = ["wgpu"]}
+iced = { git = "https://github.com/derezzedex/iced", rev = "2300281a43d7dffd935b0f07bc2c4c939f794288", features = [
+    "wgpu",
+    "offscreen",
+    "advanced",
+] }
 bytemuck = { version = "1.0", features = ["derive"] }
